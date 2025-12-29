@@ -10,13 +10,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 func main() {
-	ctx := context.Background()
 	godotenv.Load()
 	apiKey := os.Getenv("API_KEY")
 	client := http.Client{}
+	ctx := context.Background()
 
 	url, err := CreateUrl(os.Args[1], apiKey)
 	if err != nil {
@@ -34,15 +35,17 @@ func main() {
 	}
 
 	var data APIResponse
-	dataStr, err := rdb.Get(ctx, url).Result()
+
+	dbCtx, cancelDB := context.WithTimeout(ctx, time.Second)
+	defer cancelDB()
+
+	dataStr, err := rdb.Get(dbCtx, url).Result()
 	if err != redis.Nil {
-		fmt.Println("cache hit!")
 		err = json.Unmarshal([]byte(dataStr), &data)
 		if err != nil {
 			log.Fatal(err)
 		}
 	} else {
-		fmt.Println("fetching data from api...")
 		resp, err := client.Get(url)
 		if err != nil {
 			log.Fatal(err)
@@ -54,7 +57,7 @@ func main() {
 		}
 		defer resp.Body.Close()
 
-		err = rdb.Set(ctx, url, string(body), 0).Err()
+		err = rdb.Set(dbCtx, url, string(body), 12*time.Hour).Err()
 		if err != nil {
 			fmt.Printf("%s\n", err.Error())
 		}
@@ -65,7 +68,6 @@ func main() {
 		}
 	}
 
-	for _, d := range data.Days {
-		fmt.Printf("%s - %.f\n", d.DateTime, d.Temp)
-	}
+	displayTab(data)
+
 }

@@ -47,6 +47,5 @@ func DBInit(ctx context.Context, c *Config) (*redis.Client, error) {
 		return nil, err
 	}
 
-	fmt.Println("Initializaton went smooth!")
 	return client, nil
 }
