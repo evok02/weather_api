@@ -1,38 +1,71 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	"io"
 	"log"
 	"net/http"
 	"os"
 )
 
-type days map[string]any
-
 func main() {
+	ctx := context.Background()
 	godotenv.Load()
 	apiKey := os.Getenv("API_KEY")
-	args := os.Args
-	fmt.Println(args)
-	url := fmt.Sprintf("https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/%s/?unitGroup=metric&key=%s", args[1], apiKey)
 	client := http.Client{}
-	resp, err := client.Get(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	body, err := io.ReadAll(resp.Body)
+
+	url, err := CreateUrl(os.Args[1], apiKey)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	var data days
-	err = json.Unmarshal(body, &data)
+	dbConfig, err := NewDBConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println(data["days"])
+	rdb, err := DBInit(ctx, dbConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var data APIResponse
+	dataStr, err := rdb.Get(ctx, url).Result()
+	if err != redis.Nil {
+		fmt.Println("cache hit!")
+		err = json.Unmarshal([]byte(dataStr), &data)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		fmt.Println("fetching data from api...")
+		resp, err := client.Get(url)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		err = rdb.Set(ctx, url, string(body), 0).Err()
+		if err != nil {
+			fmt.Printf("%s\n", err.Error())
+		}
+
+		err = json.Unmarshal(body, &data)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	for _, d := range data.Days {
+		fmt.Printf("%s - %.f\n", d.DateTime, d.Temp)
+	}
 }
